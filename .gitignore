@@ -1,0 +1,27 @@
+# Ambientes Virtuais
+venv/
+.venv/
+env/
+
+# Configurações Sensíveis 
+.env
+
+# Banco de Dados
+data/*.db
+data/*.db-journal
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+logs/*.log
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Instructions
+instructions.md
