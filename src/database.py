@@ -73,6 +73,17 @@ def init_db():
                 )
             ''')
             
+            # Tabela para snapshots diários do portfolio
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS daily_snapshots (
+                    timestamp INTEGER PRIMARY KEY,
+                    total_equity_btc REAL,
+                    btc_balance REAL,
+                    eth_balance REAL,
+                    eth_price_in_btc REAL
+                )
+            ''')
+            
             conn.commit()
             logger.info("Banco de dados inicializado com sucesso (tabelas verificadas/criadas).")
     except Exception as e:
@@ -141,6 +152,76 @@ def get_last_timestamp(symbol: str) -> Optional[int]:
     except Exception as e:
         logger.error(f"Erro ao buscar último timestamp para {symbol}: {e}")
         raise
+
+def save_daily_snapshot(timestamp: int, total_equity_btc: float, btc_balance: float, eth_balance: float, eth_price_in_btc: float):
+    """
+    Salva um snapshot diário do portfolio no banco de dados.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO daily_snapshots 
+                (timestamp, total_equity_btc, btc_balance, eth_balance, eth_price_in_btc)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (timestamp, total_equity_btc, btc_balance, eth_balance, eth_price_in_btc))
+            conn.commit()
+            logger.info(f"Snapshot diário salvo com sucesso. Total Equity BTC: {total_equity_btc}")
+    except Exception as e:
+        logger.error(f"Erro ao salvar snapshot diário: {e}")
+        raise
+
+def get_yesterday_snapshot() -> Optional[sqlite3.Row]:
+    """
+    Busca o último snapshot salvo que tenha pelo menos 23 horas de diferença
+    do momento atual, para funcionar como o comparativo de "ontem".
+    Se não encontrar nenhum com mais de 23h, retorna o mais antigo encontrado.
+    """
+    import time
+    current_ts = int(time.time() * 1000)
+    twenty_three_hours_ms = 23 * 60 * 60 * 1000
+    target_ts = current_ts - twenty_three_hours_ms
+
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Primeiro tenta buscar O MAIS RECENTE que seja ANTERIOR a 23h atrás
+            cursor.execute('''
+                SELECT * FROM daily_snapshots 
+                WHERE timestamp <= ? 
+                ORDER BY timestamp DESC LIMIT 1
+            ''', (target_ts,))
+            
+            row = cursor.fetchone()
+            if row:
+                return row
+                
+            # Se não tem nada de 23h atrás (bot novo), pega o primeiro snapshot que achar (o mais antigo)
+            cursor.execute('''
+                SELECT * FROM daily_snapshots 
+                ORDER BY timestamp ASC LIMIT 1
+            ''')
+            return cursor.fetchone()
+            
+    except Exception as e:
+        logger.error(f"Erro ao buscar snapshot de ontem: {e}")
+        return None
+
+def get_last_trade() -> Optional[sqlite3.Row]:
+    """
+    Retorna o último trade efetuado.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM trades 
+                ORDER BY timestamp DESC LIMIT 1
+            ''')
+            return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Erro ao buscar último trade: {e}")
+        return None
 
 if __name__ == "__main__":
     # Configuração simples de log para o teste

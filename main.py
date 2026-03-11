@@ -12,6 +12,7 @@ from database import init_db, get_db_connection
 from exchange import get_exchange, get_balance, fetch_historical_data, create_limit_order
 from indicators import calculate_zscore, calculate_kelly_size
 from messenger import send_alert, send_trade_report
+from portfolio_tracker import run_daily_report
 
 # Garante que a pasta logs exista
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
@@ -190,6 +191,32 @@ def run_cycle():
         err_msg = f"Erro letal durante o ciclo principal do bot: {e}"
         logger.error(err_msg, exc_info=True)
         send_alert(f"🚨 <b>FALHA NO BOT DE ARBITRAGEM</b>\n\nO loop de {timeframe} sofreu e foi interrompido:\n<code>{e}</code>")
+        
+    finally:
+        # 7. Relatório Diário (Roda garantidamente 1 vez ao dia se for a hora certa, independente de trades)
+        try:
+            from database import get_yesterday_snapshot, get_db_connection
+            # Verificamos se já existe um snapshot "hoje" (nas últimas 23h). Se não existir, gera o relatório.
+            # get_yesterday_snapshot não é exatamente "ontem calendário", mas sim "há 24h atrás".
+            # Para evitar floodar o bot com relatórios se rodar de 4 em 4h, podemos verificar
+            # o último snapshot e se ele for mais antigo que 20-24h, chamamos o relatório.
+            
+            import time
+            current_ts = int(time.time() * 1000)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT MAX(timestamp) FROM daily_snapshots')
+                last_snap = cursor.fetchone()[0]
+                
+            # Se não tem nenhum, ou se o último foi há mais de 23h, roda o relatório
+            if not last_snap or (current_ts - last_snap) > (23 * 60 * 60 * 1000):
+                logger.info("⏱️ Momento de gerar o Relatório Diário de Performance.")
+                run_daily_report()
+            else:
+                logger.debug("Relatório Diário já gerado nas últimas 24h.")
+                
+        except Exception as e:
+            logger.error(f"Erro ao tentar disparar Relatório Diário no fim do ciclo: {e}")
 
 if __name__ == "__main__":
     load_dotenv()
