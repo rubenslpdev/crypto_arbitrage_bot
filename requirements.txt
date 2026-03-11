@@ -1,6 +1,6 @@
 ccxt                  # Conexão com Binance e outras exchanges
-pandas==2.2.0         # Manipulação de dados e cálculos matemáticos
-python-dotenv==1.0.0  # Para ler o arquivo .env
-requests==2.31.0      # Para chamadas diretas de API (Glassnode/Telegram)
-python-telegram-bot==20.7 # Automação de alertas
-matplotlib==3.8.0     # Opcional: para gerar gráficos de performance
+pandas                # Manipulação de dados e cálculos matemáticos
+python-dotenv         # Para ler o arquivo .env
+requests              # Para chamadas diretas de API (Glassnode/Telegram)
+python-telegram-bot   # Automação de alertas
+matplotlib            # Opcional: para gerar gráficos de performance
