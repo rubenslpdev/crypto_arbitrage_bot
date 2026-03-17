@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from database import init_db, get_db_connection
-from exchange import get_exchange, get_balance, fetch_historical_data, create_limit_order
+from exchange import get_exchange, get_balance, fetch_historical_data, create_limit_order, check_bnb_for_fees
 from indicators import calculate_zscore, calculate_kelly_size
 from messenger import send_alert, send_trade_report
 from portfolio_tracker import run_daily_report
@@ -68,7 +68,7 @@ def run_cycle():
     try:
         # 1. Inicialização
         init_db()
-        exchange_client = get_exchange() # Garante o set_sandbox_mode(True) interno
+        exchange_client = get_exchange()  # Modo Mainnet ou Testnet conforme BINANCE_IS_TESTNET no .env
         
         # 2. Sincronização
         fetch_historical_data(symbol, timeframe=timeframe)
@@ -152,8 +152,18 @@ def run_cycle():
             amount = amount_eth_to_sell
             price = limit_price
 
+        # Verificação de saldo BNB para pagamento de taxas com desconto (~25%)
+        use_bnb_for_fees = os.getenv('USE_BNB_FOR_FEES', 'False').strip().lower() == 'true'
+        if use_bnb_for_fees:
+            bnb_ok = check_bnb_for_fees(min_bnb=0.01)
+            if not bnb_ok:
+                send_alert(
+                    "⚠️ <b>Aviso de Taxa:</b> Saldo de BNB insuficiente para o desconto de 25%. "
+                    "A taxa desta operação será cobrada na moeda da ordem."
+                )
+        
         # Envia de fato a ordem para a corretora
-        logger.info(f"Enviando ordem Binance Testnet: LIMIT {side.upper()} {amount:.4f} {symbol} a {price:.6f} via Half-Kelly ({kelly_fraction*100:.2f}%)")
+        logger.info(f"Enviando ordem Binance: LIMIT {side.upper()} {amount:.4f} {symbol} a {price:.6f} via Half-Kelly ({kelly_fraction*100:.2f}%)")
         order = create_limit_order(symbol, side, amount, price)
         
         # 6. Persistência de Dados e Alertas

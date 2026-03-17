@@ -36,15 +36,15 @@ def get_db_connection():
 
 def init_db():
     """
-    Cria as tabelas market_data (preços e Z-Score) e trades (histórico de ordens)
-    caso elas ainda não existam.
+    Cria as tabelas market_data (preços e Z-Score), trades (histórico de ordens)
+    e daily_snapshots (portfolio diário) caso ainda não existam.
+    Também aplica migração segura para adicionar colunas novas em daily_snapshots.
     """
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Tabela para armazenar os candles (OHLCV) e Z-Score
-            # A chave composta evita duplicar o mesmo candle para o mesmo par
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS market_data (
                     symbol TEXT,
@@ -58,7 +58,7 @@ def init_db():
                     PRIMARY KEY (symbol, timestamp)
                 )
             ''')
-            
+
             # Tabela para armazenar o histórico de ordens executadas/tentadas
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
@@ -72,7 +72,7 @@ def init_db():
                     estimated_profit REAL
                 )
             ''')
-            
+
             # Tabela para snapshots diários do portfolio
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS daily_snapshots (
@@ -80,10 +80,27 @@ def init_db():
                     total_equity_btc REAL,
                     btc_balance REAL,
                     eth_balance REAL,
-                    eth_price_in_btc REAL
+                    eth_price_in_btc REAL,
+                    bnb_balance REAL,
+                    usdt_balance REAL
                 )
             ''')
-            
+
+            # --- Migração segura: garante colunas novas em BBs existentes ---
+            # SQLite não suporta ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
+            # então verificamos via PRAGMA antes de tentar adicionar.
+            cursor.execute("PRAGMA table_info(daily_snapshots)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+
+            for col_def in [
+                ("bnb_balance",  "ALTER TABLE daily_snapshots ADD COLUMN bnb_balance REAL DEFAULT 0.0"),
+                ("usdt_balance", "ALTER TABLE daily_snapshots ADD COLUMN usdt_balance REAL DEFAULT 0.0"),
+            ]:
+                col_name, alter_sql = col_def
+                if col_name not in existing_columns:
+                    cursor.execute(alter_sql)
+                    logger.info(f"Migração aplicada: coluna '{col_name}' adicionada a daily_snapshots.")
+
             conn.commit()
             logger.info("Banco de dados inicializado com sucesso (tabelas verificadas/criadas).")
     except Exception as e:
@@ -153,20 +170,42 @@ def get_last_timestamp(symbol: str) -> Optional[int]:
         logger.error(f"Erro ao buscar último timestamp para {symbol}: {e}")
         raise
 
-def save_daily_snapshot(timestamp: int, total_equity_btc: float, btc_balance: float, eth_balance: float, eth_price_in_btc: float):
+def save_daily_snapshot(
+    timestamp: int,
+    total_equity_btc: float,
+    btc_balance: float,
+    eth_balance: float,
+    eth_price_in_btc: float,
+    bnb_balance: float = 0.0,
+    usdt_balance: float = 0.0,
+):
     """
     Salva um snapshot diário do portfolio no banco de dados.
+
+    Args:
+        timestamp (int): Timestamp em milissegundos.
+        total_equity_btc (float): Patrimônio total convertido em BTC.
+        btc_balance (float): Saldo livre de BTC.
+        eth_balance (float): Saldo livre de ETH.
+        eth_price_in_btc (float): Preço do ETH cotado em BTC.
+        bnb_balance (float): Saldo livre de BNB.
+        usdt_balance (float): Saldo livre de USDT.
     """
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO daily_snapshots 
-                (timestamp, total_equity_btc, btc_balance, eth_balance, eth_price_in_btc)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (timestamp, total_equity_btc, btc_balance, eth_balance, eth_price_in_btc))
+                INSERT OR REPLACE INTO daily_snapshots
+                (timestamp, total_equity_btc, btc_balance, eth_balance,
+                 eth_price_in_btc, bnb_balance, usdt_balance)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (timestamp, total_equity_btc, btc_balance, eth_balance,
+                  eth_price_in_btc, bnb_balance, usdt_balance))
             conn.commit()
-            logger.info(f"Snapshot diário salvo com sucesso. Total Equity BTC: {total_equity_btc}")
+            logger.info(
+                f"Snapshot diário salvo. Equity: {total_equity_btc:.6f} BTC | "
+                f"BNB: {bnb_balance:.4f} | USDT: {usdt_balance:.2f}"
+            )
     except Exception as e:
         logger.error(f"Erro ao salvar snapshot diário: {e}")
         raise
